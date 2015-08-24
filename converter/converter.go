@@ -29,6 +29,7 @@ var convertedFile string
 var stringBuffer bytes.Buffer
 var foundNameSpaces []lessNameSpace
 var capturedNameSpaces []string
+var seenMixins map[string]bool
 
 func LessToSass(filename string) chan DataStream {
 	ch := make(chan DataStream)
@@ -48,6 +49,9 @@ func LessToSass(filename string) chan DataStream {
 func convert(file *os.File) string {
 	stringBuffer.Reset()
 	capturedNameSpaces = nil
+	if seenMixins == nil { // initialize our hash of seen mixins.
+		seenMixins = make(map[string]bool)
+	}
 	reader := bufio.NewReader(file)
 	scanner := bufio.NewScanner(reader)
 	scanner.Split(bufio.ScanLines)
@@ -113,8 +117,28 @@ func handleLessNamespaces(line string) string {
 	if regexes.LessMixin.MatchString(line) {
 		mixIns := regexes.LessMixin.FindAllStringSubmatchIndex(line, -1)
 		for i, _ := range mixIns {
+			var mixinName = line[mixIns[i][2]:mixIns[i][3]]
+			var hasArgs = false;
+			
+			if mixIns[i][4] != -1 && mixIns[i][5] != -1 {
+				fmt.Println(mixIns[i])
+				var args = line[mixIns[i][4]:mixIns[i][5]]
+				if regexes.OpenPeren.MatchString(args) && regexes.ClosedPeren.MatchString(args) {
+					if !regexes.MixinEmptyArgs.MatchString(args){
+						hasArgs = true
+					}
+				}
+			}
+			var include = "@include "
+			if !hasArgs {
+				_, ok := seenMixins[mixinName]
+				if (!ok){
+					include = "@extend "
+					fmt.Println("used: ",mixinName)
+				}
+			}
 			idx := mixIns[i][0]
-			line = line[:idx] + "@include " + line[idx+1:]
+				line = line[:idx] + include + line[idx+1:]
 		}
 	}
 	return line
@@ -199,7 +223,10 @@ func swapMixins(line string) string {
 	if len(mixIns) > 0 {
 		for i, _ := range mixIns {
 			idx := mixIns[i][0]
+			var mixinName = line[mixIns[i][2]:mixIns[i][3]]
+			fmt.Println(mixinName);
 			line = line[:idx] + mixin + strings.Trim(line[idx+1:], " ")
+			seenMixins[mixinName] = true
 			line = regexes.EmptyParens.ReplaceAllLiteralString(line, "")
 			line = regexes.OffByOneMixinConcat.ReplaceAllLiteralString(line, "-")
 		}
